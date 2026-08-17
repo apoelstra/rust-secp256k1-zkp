@@ -12,11 +12,9 @@ static void rand_scalar(rustsecp256k1zkp_v0_11_0_scalar *scalar) {
 
 static void rand_point(rustsecp256k1zkp_v0_11_0_ge *point) {
     rustsecp256k1zkp_v0_11_0_scalar x;
-    rustsecp256k1zkp_v0_11_0_gej pointj;
     rand_scalar(&x);
 
-    rustsecp256k1zkp_v0_11_0_ecmult_gen(&CTX->ecmult_gen_ctx, &pointj, &x);
-    rustsecp256k1zkp_v0_11_0_ge_set_gej(point, &pointj);
+    rustsecp256k1zkp_v0_11_0_ecmult_gen_ge(&CTX->ecmult_gen_ctx, point, &x);
 }
 
 static void dleq_nonce_bitflip(unsigned char **args, size_t n_flip, size_t n_bytes) {
@@ -1184,6 +1182,30 @@ static void adaptor_test_issue335(void) {
     }
 }
 
+DEFINE_SHA256_TRANSFORM_PROBE(sha256_ecdsa_adaptor)
+static void test_ecdsa_adaptor_ctx_sha256(void) {
+    /* Check ctx-provided SHA256 compression override takes effect */
+    rustsecp256k1zkp_v0_11_0_context *ctx = rustsecp256k1zkp_v0_11_0_context_clone(CTX);
+    unsigned char out_default[162], out_custom[162];
+    unsigned char sk[32] = {1}, msg32[32] = {1};
+    unsigned char enckey_sk[32] = {2};
+    rustsecp256k1zkp_v0_11_0_pubkey enckey;
+    CHECK(rustsecp256k1zkp_v0_11_0_ec_pubkey_create(ctx, &enckey, enckey_sk));
+
+    /* Default behavior. No ctx-provided SHA256 compression */
+    CHECK(rustsecp256k1zkp_v0_11_0_ecdsa_adaptor_encrypt(ctx, out_default, sk, &enckey, msg32, NULL, NULL));
+    CHECK(!sha256_ecdsa_adaptor_called);
+
+    /* Override SHA256 compression directly, bypassing the ctx setter sanity checks */
+    ctx->hash_ctx.fn_sha256_compression = sha256_ecdsa_adaptor;
+    CHECK(rustsecp256k1zkp_v0_11_0_ecdsa_adaptor_encrypt(ctx, out_custom, sk, &enckey, msg32, NULL, NULL));
+    CHECK(sha256_ecdsa_adaptor_called);
+    /* Outputs must differ if custom compression was used */
+    CHECK(rustsecp256k1zkp_v0_11_0_memcmp_var(out_default, out_custom, 162) != 0);
+
+    rustsecp256k1zkp_v0_11_0_context_destroy(ctx);
+}
+
 /* --- Test registry --- */
 REPEAT_TEST(dleq_tests)
 REPEAT_TEST(adaptor_tests)
@@ -1197,6 +1219,7 @@ static const struct tf_test_entry tests_ecdsa_adaptor[] = {
     CASE1(adaptor_tests),
     CASE1(multi_hop_lock_tests),
     CASE1(adaptor_test_issue335),
+    CASE1(test_ecdsa_adaptor_ctx_sha256),
 };
 
 #endif /* SECP256K1_MODULE_ECDSA_ADAPTOR_TESTS_H */

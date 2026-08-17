@@ -61,8 +61,9 @@ static int rustsecp256k1zkp_v0_11_0_whitelist_compute_tweaked_privkey(const rust
     }
     if (ret) {
         rustsecp256k1zkp_v0_11_0_gej pkeyj;
-        rustsecp256k1zkp_v0_11_0_ecmult_gen(&ctx->ecmult_gen_ctx, &pkeyj, skey);
+        rustsecp256k1zkp_v0_11_0_ecmult_gen_gej(&ctx->ecmult_gen_ctx, &pkeyj, skey);
         ret = rustsecp256k1zkp_v0_11_0_whitelist_hash_pubkey(hash_ctx, &tweak, &pkeyj);
+        rustsecp256k1zkp_v0_11_0_gej_clear(&pkeyj);
     }
     if (ret) {
         rustsecp256k1zkp_v0_11_0_scalar sonline;
@@ -116,6 +117,9 @@ static int rustsecp256k1zkp_v0_11_0_whitelist_compute_keys_and_message(const rus
         /* compute tweaked keys */
         rustsecp256k1zkp_v0_11_0_gej_set_ge(&tweaked_gej, &offline_ge);
         rustsecp256k1zkp_v0_11_0_gej_add_ge_var(&tweaked_gej, &tweaked_gej, &subkey_ge, NULL);
+        /* Fails only for the degenerate destination W = -P_i, where the ring
+         * key intentionally collapses to Q_i. See the rationale on
+         * rustsecp256k1zkp_v0_11_0_whitelist_verify in include/rustsecp256k1zkp_v0_11_0_whitelist.h. */
         rustsecp256k1zkp_v0_11_0_whitelist_tweak_pubkey(hash_ctx, &tweaked_gej);
         rustsecp256k1zkp_v0_11_0_gej_add_ge_var(&keys[i], &tweaked_gej, &online_ge, NULL);
     }
