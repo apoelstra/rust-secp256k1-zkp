@@ -28,6 +28,8 @@ static void test_bppp_generators_api(void) {
     CHECK(gens != NULL);
     gens_orig = gens; /* Preserve for round-trip test */
 
+    CHECK(rustsecp256k1zkp_v0_11_0_bppp_generators_create(CTX, SIZE_MAX / sizeof(rustsecp256k1zkp_v0_11_0_ge) + 1) == NULL);
+
     /* Serialize */
     CHECK_ILLEGAL(CTX, rustsecp256k1zkp_v0_11_0_bppp_generators_serialize(CTX, NULL, gens_ser, &len));
     CHECK_ILLEGAL(CTX, rustsecp256k1zkp_v0_11_0_bppp_generators_serialize(CTX, gens, NULL, &len));
@@ -662,6 +664,34 @@ static void norm_arg_test_all(void) {
     norm_arg_test(64, 64);
 }
 
+DEFINE_SHA256_TRANSFORM_PROBE(sha256_bppp)
+static void test_bppp_ctx_sha256(void) {
+    /* Check ctx-provided SHA256 compression override takes effect */
+    rustsecp256k1zkp_v0_11_0_context *ctx = rustsecp256k1zkp_v0_11_0_context_clone(CTX);
+    unsigned char out_default[66], out_custom[66];
+    rustsecp256k1zkp_v0_11_0_bppp_generators *gens;
+    size_t len = sizeof(out_default);
+
+    /* Default behavior. No ctx-provided SHA256 compression */
+    gens = rustsecp256k1zkp_v0_11_0_bppp_generators_create(ctx, 2);
+    CHECK(gens != NULL);
+    CHECK(rustsecp256k1zkp_v0_11_0_bppp_generators_serialize(ctx, gens, out_default, &len));
+    rustsecp256k1zkp_v0_11_0_bppp_generators_destroy(ctx, gens);
+    CHECK(!sha256_bppp_called);
+
+    /* Override SHA256 compression directly, bypassing the ctx setter sanity checks */
+    ctx->hash_ctx.fn_sha256_compression = sha256_bppp;
+    gens = rustsecp256k1zkp_v0_11_0_bppp_generators_create(ctx, 2);
+    CHECK(gens != NULL);
+    CHECK(rustsecp256k1zkp_v0_11_0_bppp_generators_serialize(ctx, gens, out_custom, &len));
+    rustsecp256k1zkp_v0_11_0_bppp_generators_destroy(ctx, gens);
+    CHECK(sha256_bppp_called);
+    /* Outputs must differ if custom compression was used */
+    CHECK(rustsecp256k1zkp_v0_11_0_memcmp_var(out_default, out_custom, 66) != 0);
+
+    rustsecp256k1zkp_v0_11_0_context_destroy(ctx);
+}
+
 /* --- Test registry --- */
 static const struct tf_test_entry tests_bppp[] = {
     CASE1(test_log_exp),
@@ -674,6 +704,7 @@ static const struct tf_test_entry tests_bppp[] = {
     CASE1(norm_arg_test_all),
     CASE1(norm_arg_verify_vectors),
     CASE1(norm_arg_prove_vectors),
+    CASE1(test_bppp_ctx_sha256),
 };
 
 #endif

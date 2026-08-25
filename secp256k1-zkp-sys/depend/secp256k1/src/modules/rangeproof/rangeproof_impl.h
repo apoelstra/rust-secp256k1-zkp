@@ -268,6 +268,8 @@ SECP256K1_INLINE static int rustsecp256k1zkp_v0_11_0_rangeproof_sign_impl(const 
         prep[idx] = 128;
     }
     if (!rustsecp256k1zkp_v0_11_0_rangeproof_genrand(hash_ctx, sec, s, prep, rsizes, rings, nonce, commit, proof, len, genp)) {
+        rustsecp256k1zkp_v0_11_0_memclear_explicit(prep, sizeof(prep));
+        rustsecp256k1zkp_v0_11_0_memclear_explicit(sec, sizeof(sec));
         return 0;
     }
     rustsecp256k1zkp_v0_11_0_memclear_explicit(prep, 4096);
@@ -284,7 +286,10 @@ SECP256K1_INLINE static int rustsecp256k1zkp_v0_11_0_rangeproof_sign_impl(const 
      */
     rustsecp256k1zkp_v0_11_0_scalar_set_b32(&stmp, blind, &overflow);
     rustsecp256k1zkp_v0_11_0_scalar_add(&sec[rings - 1], &sec[rings - 1], &stmp);
+    rustsecp256k1zkp_v0_11_0_scalar_clear(&stmp);
     if (overflow || rustsecp256k1zkp_v0_11_0_scalar_is_zero(&sec[rings - 1])) {
+        rustsecp256k1zkp_v0_11_0_memclear_explicit(sec, sizeof(sec));
+        rustsecp256k1zkp_v0_11_0_memclear_explicit(k, sizeof(k));
         return 0;
     }
     signs = &proof[len];
@@ -298,6 +303,8 @@ SECP256K1_INLINE static int rustsecp256k1zkp_v0_11_0_rangeproof_sign_impl(const 
         /*OPT: Use the precomputed gen2 basis?*/
         rustsecp256k1zkp_v0_11_0_pedersen_ecmult(ecmult_gen_ctx, &pubs[npub], &sec[i], ((uint64_t)secidx[i] * scale) << (i*2), genp);
         if (rustsecp256k1zkp_v0_11_0_gej_is_infinity(&pubs[npub])) {
+            rustsecp256k1zkp_v0_11_0_memclear_explicit(sec, sizeof(sec));
+            rustsecp256k1zkp_v0_11_0_memclear_explicit(k, sizeof(k));
             return 0;
         }
         if (i < rings - 1) {
@@ -323,6 +330,8 @@ SECP256K1_INLINE static int rustsecp256k1zkp_v0_11_0_rangeproof_sign_impl(const 
     rustsecp256k1zkp_v0_11_0_sha256_finalize(hash_ctx, &sha256_m, tmp);
     rustsecp256k1zkp_v0_11_0_sha256_clear(&sha256_m);
     if (!rustsecp256k1zkp_v0_11_0_borromean_sign(hash_ctx, ecmult_gen_ctx, &proof[len], s, pubs, k, sec, rsizes, secidx, rings, tmp, 32)) {
+        rustsecp256k1zkp_v0_11_0_memclear_explicit(sec, sizeof(sec));
+        rustsecp256k1zkp_v0_11_0_memclear_explicit(k, sizeof(k));
         return 0;
     }
     len += 32;
@@ -332,7 +341,8 @@ SECP256K1_INLINE static int rustsecp256k1zkp_v0_11_0_rangeproof_sign_impl(const 
     }
     VERIFY_CHECK(len <= *plen);
     *plen = len;
-    rustsecp256k1zkp_v0_11_0_memclear_explicit(prep, 4096);
+    rustsecp256k1zkp_v0_11_0_memclear_explicit(sec, sizeof(sec));
+    rustsecp256k1zkp_v0_11_0_memclear_explicit(k, sizeof(k));
     return 1;
 }
 
@@ -658,6 +668,7 @@ SECP256K1_INLINE static int rustsecp256k1zkp_v0_11_0_rangeproof_verify_impl(cons
             return 0;
         }
         if (!rustsecp256k1zkp_v0_11_0_rangeproof_rewind_inner(hash_ctx, &blind, &vv, message_out, outlen, evalues, s, rsizes, rings, nonce, commit, proof, offset_post_header, genp)) {
+            rustsecp256k1zkp_v0_11_0_scalar_clear(&blind);
             return 0;
         }
         /* Unwind apparently successful, see if the commitment can be reconstructed. */
@@ -665,11 +676,13 @@ SECP256K1_INLINE static int rustsecp256k1zkp_v0_11_0_rangeproof_verify_impl(cons
         vv = (vv * scale) + *min_value;
         rustsecp256k1zkp_v0_11_0_pedersen_ecmult(ecmult_gen_ctx, &accj, &blind, vv, genp);
         if (rustsecp256k1zkp_v0_11_0_gej_is_infinity(&accj)) {
+            rustsecp256k1zkp_v0_11_0_scalar_clear(&blind);
             return 0;
         }
         rustsecp256k1zkp_v0_11_0_gej_neg(&accj, &accj);
         rustsecp256k1zkp_v0_11_0_gej_add_ge_var(&accj, &accj, commit, NULL);
         if (!rustsecp256k1zkp_v0_11_0_gej_is_infinity(&accj)) {
+            rustsecp256k1zkp_v0_11_0_scalar_clear(&blind);
             return 0;
         }
         if (blindout) {
@@ -678,6 +691,7 @@ SECP256K1_INLINE static int rustsecp256k1zkp_v0_11_0_rangeproof_verify_impl(cons
         if (value_out) {
             *value_out = vv;
         }
+        rustsecp256k1zkp_v0_11_0_scalar_clear(&blind);
     }
     return ret;
 }

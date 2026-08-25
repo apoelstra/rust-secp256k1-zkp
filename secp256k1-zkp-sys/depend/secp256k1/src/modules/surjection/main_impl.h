@@ -261,10 +261,13 @@ int rustsecp256k1zkp_v0_11_0_surjectionproof_generate(const rustsecp256k1zkp_v0_
     /* Compute secret key */
     rustsecp256k1zkp_v0_11_0_scalar_set_b32(&tmps, input_blinding_key, &overflow);
     if (overflow) {
+        rustsecp256k1zkp_v0_11_0_scalar_clear(&tmps);
         return 0;
     }
     rustsecp256k1zkp_v0_11_0_scalar_set_b32(&blinding_key, output_blinding_key, &overflow);
     if (overflow) {
+        rustsecp256k1zkp_v0_11_0_scalar_clear(&tmps);
+        rustsecp256k1zkp_v0_11_0_scalar_clear(&blinding_key);
         return 0;
     }
     /* If any input tag is equal to an output tag, verification will fail, because our ring
@@ -273,20 +276,25 @@ int rustsecp256k1zkp_v0_11_0_surjectionproof_generate(const rustsecp256k1zkp_v0_
      * this at the same time that we relax the max-256-inputs rule. */
     for (i = 0; i < n_ephemeral_input_tags; i++) {
         if (rustsecp256k1zkp_v0_11_0_memcmp_var(ephemeral_input_tags[i].data, ephemeral_output_tag->data, sizeof(ephemeral_output_tag->data)) == 0) {
+            rustsecp256k1zkp_v0_11_0_scalar_clear(&tmps);
+            rustsecp256k1zkp_v0_11_0_scalar_clear(&blinding_key);
             return 0;
         }
     }
     rustsecp256k1zkp_v0_11_0_scalar_negate(&tmps, &tmps);
     rustsecp256k1zkp_v0_11_0_scalar_add(&blinding_key, &blinding_key, &tmps);
+    rustsecp256k1zkp_v0_11_0_scalar_clear(&tmps);
 
     /* Compute public keys */
     n_total_pubkeys = rustsecp256k1zkp_v0_11_0_surjectionproof_n_total_inputs(ctx, proof);
 
     if (n_used_pubkeys > n_total_pubkeys || n_total_pubkeys != n_ephemeral_input_tags) {
+        rustsecp256k1zkp_v0_11_0_scalar_clear(&blinding_key);
         return 0;
     }
 
     if (rustsecp256k1zkp_v0_11_0_surjection_compute_public_keys(ring_pubkeys, n_used_pubkeys, ephemeral_input_tags, n_total_pubkeys, proof->used_inputs, ephemeral_output_tag, input_index, &ring_input_index) == 0) {
+        rustsecp256k1zkp_v0_11_0_scalar_clear(&blinding_key);
         return 0;
     }
 
@@ -294,7 +302,21 @@ int rustsecp256k1zkp_v0_11_0_surjectionproof_generate(const rustsecp256k1zkp_v0_
     rsizes[0] = (int) n_used_pubkeys;
     indices[0] = (int) ring_input_index;
     rustsecp256k1zkp_v0_11_0_surjection_genmessage(hash_ctx, msg32, ephemeral_input_tags, n_total_pubkeys, ephemeral_output_tag);
-    if (rustsecp256k1zkp_v0_11_0_surjection_genrand(hash_ctx, borromean_s, n_used_pubkeys, &blinding_key) == 0) {
+    /* Derive every s-value, including the one used as the signing nonce, from
+     * every proof-relevant input to
+     * rustsecp256k1zkp_v0_11_0_surjectionproof_generate. Except with negligible hash-collision
+     * probability, this prevents distinct proof inputs from reusing any
+     * s-value.
+     *
+     * The proof-relevant arguments to rustsecp256k1zkp_v0_11_0_surjectionproof_generate
+     * correspond as follows: proof supplies n_total_pubkeys (proof->n_inputs),
+     * proof->used_inputs, and n_used_pubkeys, while proof->data is output and
+     * proof->initialized is VERIFY-only validation state; ephemeral_input_tags
+     * is committed by msg32; n_ephemeral_input_tags equals n_total_pubkeys as
+     * checked above; ephemeral_output_tag is committed by msg32; input_index
+     * and both blinding keys are passed directly. */
+    if (rustsecp256k1zkp_v0_11_0_surjection_genrand(hash_ctx, borromean_s, n_used_pubkeys, n_total_pubkeys, proof->used_inputs, msg32, input_index, input_blinding_key, output_blinding_key) == 0) {
+        rustsecp256k1zkp_v0_11_0_scalar_clear(&blinding_key);
         return 0;
     }
     /* Borromean sign will overwrite one of the s values we just generated, so use
@@ -303,11 +325,15 @@ int rustsecp256k1zkp_v0_11_0_surjectionproof_generate(const rustsecp256k1zkp_v0_
     nonce = borromean_s[ring_input_index];
     rustsecp256k1zkp_v0_11_0_scalar_clear(&borromean_s[ring_input_index]);
     if (rustsecp256k1zkp_v0_11_0_borromean_sign(hash_ctx, &ctx->ecmult_gen_ctx, &proof->data[0], borromean_s, ring_pubkeys, &nonce, &blinding_key, rsizes, indices, 1, msg32, 32) == 0) {
+        rustsecp256k1zkp_v0_11_0_scalar_clear(&blinding_key);
+        rustsecp256k1zkp_v0_11_0_scalar_clear(&nonce);
         return 0;
     }
     for (i = 0; i < n_used_pubkeys; i++) {
         rustsecp256k1zkp_v0_11_0_scalar_get_b32(&proof->data[32 + 32 * i], &borromean_s[i]);
     }
+    rustsecp256k1zkp_v0_11_0_scalar_clear(&blinding_key);
+    rustsecp256k1zkp_v0_11_0_scalar_clear(&nonce);
     return 1;
 }
 
