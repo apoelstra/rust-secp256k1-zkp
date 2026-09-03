@@ -29,26 +29,24 @@
 //!
 //! ```rust
 //! # #[cfg(all(feature = "rand", feature = "hashes", feature = "std"))] {
-//! use secp256k1::rand;
-//! use secp256k1::{Secp256k1, Message};
-//! use secp256k1::hashes::{sha256, Hash};
+//! use secp256k1::{ecdsa, generate_keypair, rand, Message};
+//! use secp256k1_zkp::hashes::sha256;
 //!
-//! let secp = Secp256k1::new();
-//! let (secret_key, public_key) = secp.generate_keypair(&mut rand::rng());
+//! let (secret_key, public_key) = generate_keypair(&mut rand::rng());
 //! let digest = sha256::Hash::hash("Hello World!".as_bytes());
 //! let message = Message::from_digest(digest.to_byte_array());
 //!
-//! let sig = secp.sign_ecdsa(message, &secret_key);
-//! assert!(secp.verify_ecdsa(message, &sig, &public_key).is_ok());
+//! let sig = ecdsa::sign(message, &secret_key);
+//! assert!(ecdsa::verify(&sig, message, &public_key).is_ok());
 //! # }
 //! ```
 //!
-//! If the "global-context" feature is enabled you have access to an alternate API.
+//! The same operations are also available as methods on the key and signature types.
 //!
 //! ```rust
 //! # #[cfg(all(feature = "global-context", feature = "hashes", feature = "rand", feature = "std"))] {
 //! use secp256k1::{rand, generate_keypair, Message};
-//! use secp256k1::hashes::{sha256, Hash};
+//! use secp256k1_zkp::hashes::sha256;
 //!
 //! let (secret_key, public_key) = generate_keypair(&mut rand::rng());
 //! let digest = sha256::Hash::hash("Hello World!".as_bytes());
@@ -65,28 +63,25 @@
 //!
 //! ```rust
 //! # #[cfg(feature = "alloc")] {
-//! use secp256k1::{Secp256k1, Message, SecretKey, PublicKey};
+//! use secp256k1::{ecdsa, Message, SecretKey, PublicKey};
 //! # fn compute_hash(_: &[u8]) -> [u8; 32] { [0xab; 32] }
 //!
-//! let secp = Secp256k1::new();
-//! let secret_key = SecretKey::from_slice(&[0xcd; 32]).expect("32 bytes, within curve order");
-//! let public_key = PublicKey::from_secret_key(&secp, &secret_key);
+//! let secret_key = SecretKey::from_secret_bytes([0xcd; 32]).expect("32 bytes, within curve order");
+//! let public_key = PublicKey::from_secret_key(&secret_key);
 //! // If the supplied byte slice was *not* the output of a cryptographic hash function this would
 //! // be cryptographically broken. It has been trivially used in the past to execute attacks.
 //! let message = Message::from_digest(compute_hash(b"CSW is not Satoshi"));
 //!
-//! let sig = secp.sign_ecdsa(message, &secret_key);
-//! assert!(secp.verify_ecdsa(message, &sig, &public_key).is_ok());
+//! let sig = ecdsa::sign(message, &secret_key);
+//! assert!(ecdsa::verify(&sig, message, &public_key).is_ok());
 //! # }
 //! ```
 //!
-//! Users who only want to verify signatures can use a cheaper context, like so:
+//! Users who only want to verify signatures can do so:
 //!
 //! ```rust
 //! # #[cfg(feature = "alloc")] {
-//! use secp256k1::{Secp256k1, Message, ecdsa, PublicKey};
-//!
-//! let secp = Secp256k1::verification_only();
+//! use secp256k1::{ecdsa, Message, PublicKey};
 //!
 //! let public_key = PublicKey::from_slice(&[
 //!     0x02,
@@ -115,12 +110,9 @@
 //! ]).expect("compact signatures are 64 bytes; DER signatures are 68-72 bytes");
 //!
 //! # #[cfg(not(secp256k1_fuzz))]
-//! assert!(secp.verify_ecdsa(message, &sig, &public_key).is_ok());
+//! assert!(ecdsa::verify(&sig, message, &public_key).is_ok());
 //! # }
 //! ```
-//!
-//! Observe that the same code using, say [`signing_only`](struct.Secp256k1.html#method.signing_only)
-//! to generate a context would simply not compile.
 //!
 //! ## Crate features/optional dependencies
 //!
@@ -509,7 +501,6 @@ fn from_hex(hex: &str, target: &mut [u8]) -> Result<usize, ()> {
 #[cfg(test)]
 mod test_util {
     pub struct KeyPairStream {
-        ctx: secp256k1::Secp256k1<secp256k1::All>,
         sk: secp256k1::SecretKey,
         pk: secp256k1::PublicKey,
     }
@@ -518,10 +509,9 @@ mod test_util {
         /// Generates a new iterator which produces an indefinite stream of distinct
         /// keypairs for use with testing.
         pub fn new() -> Self {
-            let ctx = secp256k1::Secp256k1::new();
-            let sk = secp256k1::SecretKey::from_byte_array([100; 32]).unwrap();
-            let pk = secp256k1::PublicKey::from_secret_key(&ctx, &sk);
-            KeyPairStream { sk, pk, ctx }
+            let sk = secp256k1::SecretKey::from_secret_bytes([100; 32]).unwrap();
+            let pk = secp256k1::PublicKey::from_secret_key(&sk);
+            KeyPairStream { sk, pk }
         }
     }
 
@@ -533,10 +523,7 @@ mod test_util {
 
             let ret = (self.sk, self.pk);
             self.sk = self.sk.add_tweak(&offs).expect("will not cancel");
-            self.pk = self
-                .pk
-                .add_exp_tweak(&self.ctx, &offs)
-                .expect("will not cancel");
+            self.pk = self.pk.add_exp_tweak(&offs).expect("will not cancel");
             Some(ret)
         }
     }

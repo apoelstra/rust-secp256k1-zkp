@@ -91,8 +91,8 @@ impl WhitelistSignature {
                 offline_keys.to_zkp_ffi(),
                 n_keys,
                 whitelist_key.to_zkp_ffi(),
-                online_secret_key.as_ref().as_ptr(),
-                summed_secret_key.as_ref().as_ptr(),
+                online_secret_key.as_secret_bytes().as_ptr(),
+                summed_secret_key.as_secret_bytes().as_ptr(),
                 key_index,
             )
         };
