@@ -179,7 +179,7 @@ impl EcdsaAdaptorSignature {
             ffi::secp256k1_ecdsa_adaptor_encrypt(
                 secp.ctx().as_ptr(),
                 &mut adaptor_sig,
-                sk.as_ref().as_ptr(),
+                sk.as_secret_bytes().as_ptr(),
                 enckey.to_zkp_ffi(),
                 msg.as_ref().as_ptr(),
                 ffi::secp256k1_nonce_function_ecdsa_adaptor,
@@ -214,7 +214,7 @@ impl EcdsaAdaptorSignature {
             ffi::secp256k1_ecdsa_adaptor_encrypt(
                 secp.ctx().as_ptr(),
                 &mut adaptor_sig,
-                sk.as_ref().as_ptr(),
+                sk.as_secret_bytes().as_ptr(),
                 enckey.to_zkp_ffi(),
                 msg.as_ref().as_ptr(),
                 ffi::secp256k1_nonce_function_ecdsa_adaptor,
@@ -233,7 +233,7 @@ impl EcdsaAdaptorSignature {
             let ret = ffi::secp256k1_ecdsa_adaptor_decrypt(
                 ffi::secp256k1_context_no_precomp,
                 &mut signature,
-                decryption_key.as_ref().as_ptr(),
+                decryption_key.as_secret_bytes().as_ptr(),
                 self.as_c_ptr(),
             );
 
@@ -275,9 +275,9 @@ impl EcdsaAdaptorSignature {
             return Err(Error::CannotRecoverAdaptorSecret);
         }
 
-        // Upstream `SecretKey::from_byte_array` only ever returns the `InvalidSecretKey`
+        // Upstream `SecretKey::from_secret_bytes` only ever returns the `InvalidSecretKey`
         // error variant, so we can just convert it directly.
-        SecretKey::from_byte_array(data).map_err(|_| Error::InvalidSecretKey)
+        SecretKey::from_secret_bytes(data).map_err(|_| Error::InvalidSecretKey)
     }
 
     /// Verifies that the adaptor secret can be extracted from the adaptor signature and the completed ECDSA signature.
@@ -313,15 +313,14 @@ mod tests {
     #[cfg(not(rust_secp_fuzz))]
     use crate::rand::{rng, rngs::ThreadRng, RngCore};
     use crate::SECP256K1 as SECP256K1_ZKP;
-    use secp256k1::SECP256K1;
 
     #[cfg(not(rust_secp_fuzz))]
     fn test_ecdsa_adaptor_signature_helper(
         encrypt: fn(&Message, &SecretKey, &PublicKey, &mut ThreadRng) -> EcdsaAdaptorSignature,
     ) {
         let mut rng = rng();
-        let (seckey, pubkey) = SECP256K1.generate_keypair(&mut rng);
-        let (adaptor_secret, adaptor) = SECP256K1.generate_keypair(&mut rng);
+        let (seckey, pubkey) = secp256k1::generate_keypair(&mut rng);
+        let (adaptor_secret, adaptor) = secp256k1::generate_keypair(&mut rng);
         let msg = Message::from_digest([2u8; 32]);
         let adaptor_sig = encrypt(&msg, &seckey, &adaptor, &mut rng);
 
@@ -334,9 +333,7 @@ mod tests {
         let sig = adaptor_sig
             .decrypt(&adaptor_secret)
             .expect("to be able to decrypt using the correct secret");
-        SECP256K1
-            .verify_ecdsa(msg, &sig, &pubkey)
-            .expect("signature to be valid");
+        secp256k1::ecdsa::verify(&sig, msg, &pubkey).expect("signature to be valid");
         let recovered = adaptor_sig
             .recover(SECP256K1_ZKP, &sig, &adaptor)
             .expect("to be able to recover the secret");
