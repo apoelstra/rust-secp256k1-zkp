@@ -5,8 +5,7 @@ use crate::from_hex;
 use crate::Error;
 use crate::Generator;
 use crate::PedersenCommitment;
-use crate::Verification;
-use crate::{ffi, Secp256k1, Signing, Tweak};
+use crate::{ffi, Tweak};
 
 use secp256k1::SecretKey;
 
@@ -69,8 +68,7 @@ impl RangeProof {
 
     /// Prove that `commitment` hides a value within a range, with the lower bound set to `min_value`.
     #[allow(clippy::too_many_arguments)]
-    pub fn new<C: Signing>(
-        secp: &Secp256k1<C>,
+    pub fn new(
         min_value: u64,
         commitment: PedersenCommitment,
         value: u64,
@@ -85,25 +83,28 @@ impl RangeProof {
         let mut proof = [0u8; RANGEPROOF_MAX_LENGTH];
         let mut proof_length = RANGEPROOF_MAX_LENGTH;
 
-        let ret = unsafe {
-            ffi::secp256k1_rangeproof_sign(
-                secp.ctx().as_ptr(),
-                proof.as_mut_ptr(),
-                &mut proof_length,
-                min_value,
-                commitment.as_inner(),
-                commitment_blinding.as_c_ptr(),
-                sk.as_secret_bytes().as_ptr(),
-                exp,
-                i32::from(min_bits),
-                value,
-                message.as_ptr(),
-                message.len(),
-                additional_commitment.as_ptr(),
-                additional_commitment.len(),
-                additional_generator.as_inner(),
-            )
-        };
+        let ret = crate::context::with_raw_global_context(
+            |ctx| unsafe {
+                ffi::secp256k1_rangeproof_sign(
+                    ctx.as_ptr(),
+                    proof.as_mut_ptr(),
+                    &mut proof_length,
+                    min_value,
+                    commitment.as_inner(),
+                    commitment_blinding.as_c_ptr(),
+                    sk.as_secret_bytes().as_ptr(),
+                    exp,
+                    i32::from(min_bits),
+                    value,
+                    message.as_ptr(),
+                    message.len(),
+                    additional_commitment.as_ptr(),
+                    additional_commitment.len(),
+                    additional_generator.as_inner(),
+                )
+            },
+            Some(sk.as_secret_bytes()),
+        );
 
         if ret == 0 {
             return Err(Error::CannotMakeRangeProof);
@@ -117,9 +118,8 @@ impl RangeProof {
     /// Verify that the committed value is within a range.
     ///
     /// If the verification is successful, return the actual range of possible values.
-    pub fn verify<C: Verification>(
+    pub fn verify(
         &self,
-        secp: &Secp256k1<C>,
         commitment: PedersenCommitment,
         additional_commitment: &[u8],
         additional_generator: Generator,
@@ -127,19 +127,22 @@ impl RangeProof {
         let mut min_value = 0u64;
         let mut max_value = 0u64;
 
-        let ret = unsafe {
-            ffi::secp256k1_rangeproof_verify(
-                secp.ctx().as_ptr(),
-                &mut min_value,
-                &mut max_value,
-                commitment.as_inner(),
-                self.inner.as_ptr(),
-                self.inner.len(),
-                additional_commitment.as_ptr(),
-                additional_commitment.len(),
-                additional_generator.as_inner(),
-            )
-        };
+        let ret = crate::context::with_raw_global_context(
+            |ctx| unsafe {
+                ffi::secp256k1_rangeproof_verify(
+                    ctx.as_ptr(),
+                    &mut min_value,
+                    &mut max_value,
+                    commitment.as_inner(),
+                    self.inner.as_ptr(),
+                    self.inner.len(),
+                    additional_commitment.as_ptr(),
+                    additional_commitment.len(),
+                    additional_generator.as_inner(),
+                )
+            },
+            None,
+        );
 
         if ret == 0 {
             return Err(Error::InvalidRangeProof);
@@ -152,9 +155,8 @@ impl RangeProof {
     }
 
     /// Verify a range proof proof and rewind the proof to recover information sent by its author.
-    pub fn rewind<C: Verification>(
+    pub fn rewind(
         &self,
-        secp: &Secp256k1<C>,
         commitment: PedersenCommitment,
         sk: SecretKey,
         additional_commitment: &[u8],
@@ -168,24 +170,27 @@ impl RangeProof {
         let mut message = [0u8; 4096];
         let mut message_length = 4096usize;
 
-        let ret = unsafe {
-            ffi::secp256k1_rangeproof_rewind(
-                secp.ctx().as_ptr(),
-                blinding_factor.as_mut_ptr(),
-                &mut value,
-                message.as_mut_ptr(),
-                &mut message_length,
-                sk.as_secret_bytes().as_ptr(),
-                &mut min_value,
-                &mut max_value,
-                commitment.as_inner(),
-                self.inner.as_ptr(),
-                self.inner.len(),
-                additional_commitment.as_ptr(),
-                additional_commitment.len(),
-                additional_generator.as_inner(),
-            )
-        };
+        let ret = crate::context::with_raw_global_context(
+            |ctx| unsafe {
+                ffi::secp256k1_rangeproof_rewind(
+                    ctx.as_ptr(),
+                    blinding_factor.as_mut_ptr(),
+                    &mut value,
+                    message.as_mut_ptr(),
+                    &mut message_length,
+                    sk.as_secret_bytes().as_ptr(),
+                    &mut min_value,
+                    &mut max_value,
+                    commitment.as_inner(),
+                    self.inner.as_ptr(),
+                    self.inner.len(),
+                    additional_commitment.as_ptr(),
+                    additional_commitment.len(),
+                    additional_generator.as_inner(),
+                )
+            },
+            Some(sk.as_secret_bytes()),
+        );
 
         if ret == 0 {
             return Err(Error::InvalidRangeProof);
@@ -266,11 +271,12 @@ pub struct Opening {
     pub message: Box<[u8]>,
 }
 
-#[cfg(all(test, feature = "global-context"))] // use global context for convenience
+#[cfg(all(test, feature = "rand"))]
 mod tests {
     use super::*;
+
+    use crate::{CommitmentSecrets, Tag};
     use crate::rand::rng;
-    use crate::{CommitmentSecrets, Tag, SECP256K1};
 
     #[test]
     fn create_and_verify_range_proof() {
@@ -287,7 +293,6 @@ mod tests {
             Generator::new_blinded(tag, commitment_secrets.generator_blinding_factor);
 
         let proof = RangeProof::new(
-            SECP256K1,
             1,
             commitment,
             value,
@@ -303,7 +308,6 @@ mod tests {
 
         proof
             .verify(
-                SECP256K1,
                 commitment,
                 additional_commitment,
                 additional_generator,
@@ -334,7 +338,6 @@ mod tests {
             Generator::new_blinded(tag, commitment_secrets.generator_blinding_factor);
 
         let proof = RangeProof::new(
-            SECP256K1,
             1,
             commitment,
             value,
@@ -350,7 +353,6 @@ mod tests {
 
         let (opening, _range) = proof
             .rewind(
-                SECP256K1,
                 commitment,
                 sk,
                 additional_commitment,
